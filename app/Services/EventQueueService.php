@@ -68,16 +68,6 @@ class EventQueueService
         return $adapter->push($event);
     }
 
-    public function startHighPriorityConsumer(callable $handler): void
-    {
-        $this->highPriorityAdapter->consume('events.high_priority', $handler);
-    }
-
-    public function startNormalPriorityConsumer(callable $handler): void
-    {
-        $this->normalPriorityAdapter->consume('events_stream', $handler);
-    }
-
     public function getQueueStats(): array
     {
         return [

@@ -12,13 +12,9 @@ use Throwable;
 
 class EventStreamProcessor
 {
-    private const STREAM_KEY = 'events_stream';
-    private const HIGH_PRIORITY_STREAM = 'events_high_priority';
-    private const CONSUMER_GROUP = 'event_processors';
-    private const CONSUMER_NAME = 'worker_';
-    private const BATCH_SIZE = 100;
-    private const MAX_RETRIES = 3;
+    private const CONSUMER_NAME_PREFIX = 'worker_';
 
+    // not used
     private string $consumerId;
 
     public function __construct(
@@ -27,102 +23,8 @@ class EventStreamProcessor
         private CircuitBreaker $circuitBreaker,
         private array $handlers = []
     ) {
-        $this->consumerId = self::CONSUMER_NAME . gethostname() . '_' . getmypid();
+        $this->consumerId = self::CONSUMER_NAME_PREFIX . gethostname() . '_' . getmypid();
         $this->registerHandlers();
-    }
-
-    /**
-     * Обработка батча событий
-     */
-    public function processBatch(int $batchSize = self::BATCH_SIZE): int
-    {
-        $startTime = microtime(true);
-        $processed = 0;
-
-        try {
-            // 1. Сначала проверяем high priority stream
-            $processed += $this->processStream(self::HIGH_PRIORITY_STREAM, $batchSize - $processed);
-
-            // 2. Если есть место в батче, обрабатываем обычные события
-            if ($processed < $batchSize) {
-                $processed += $this->processStream(self::STREAM_KEY, $batchSize - $processed);
-            }
-
-            // 3. Пытаемся забрать "зависшие" сообщения
-            if ($processed < $batchSize / 2) {
-                $processed += $this->claimPendingMessages($batchSize - $processed);
-            }
-        } catch (Throwable $e) {
-            $this->metrics->increment('stream_processor_errors_total');
-            Log::error('Batch processing failed', [
-                'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString(),
-            ]);
-
-            // Circuit breaker для проблемных потоков
-            $this->circuitBreaker->recordFailure('stream_processing');
-
-            throw $e;
-        }
-
-        // Метрики
-        $duration = microtime(true) - $startTime;
-        $this->metrics->histogram('batch_processing_duration_seconds', $duration, [
-            'batch_size' => (string) $processed,
-        ]);
-
-        $this->metrics->increment('events_processed_total', [
-            'stream_type' => $processed > 0 ? 'mixed' : 'empty',
-        ]);
-
-        if ($processed > 0) {
-            $this->circuitBreaker->recordSuccess('stream_processing');
-        }
-
-        return $processed;
-    }
-
-    /**
-     * Обработка одного стрима
-     *
-     * @TODO - вынести в Redis адаптер
-     */
-    private function processStream(string $streamKey, int $limit): int
-    {
-        $processed = 0;
-
-        $messages = Redis::xreadgroup(
-            self::CONSUMER_GROUP,
-            $this->consumerId,
-            [$streamKey => '>'],
-            $limit,
-            1000 // timeout в миллисекундах
-        );
-
-        if (empty($messages)) {
-            return 0;
-        }
-
-        foreach ($messages as $stream => $streamMessages) {
-            foreach ($streamMessages as $messageId => $message) {
-                try {
-                    $this->processMessage($messageId, $message, $stream);
-                    $processed++;
-
-                    // ACK сообщения
-                    Redis::xack($stream, self::CONSUMER_GROUP, [$messageId]);
-                } catch (Throwable $e) {
-                    $this->handleProcessingError($messageId, $message, $stream, $e);
-                }
-
-                // Прерываем если достигли лимита
-                if ($processed >= $limit) {
-                    break 2;
-                }
-            }
-        }
-
-        return $processed;
     }
 
     /**
@@ -173,33 +75,33 @@ class EventStreamProcessor
             $this->metrics->histogram('event_processing_duration_seconds', $duration, [
                 'event_type' => $event->eventType,
                 'priority' => (string) $event->priority,
-                'source' => 'direct', // rabbitmq или redis
+                'source' => $event->source ?? 'unknown',
             ]);
 
             $this->metrics->increment('event_processed_total', [
                 'type' => $event->eventType,
                 'status' => 'success',
-                'source' => 'direct',
+                'source' => $event->source ?? 'unknown',
             ]);
 
             Log::debug('Event processed successfully', [
                 'event_id' => $event->id,
                 'type' => $event->eventType,
                 'processing_time_ms' => round($duration * 1000, 2),
-                'source' => 'direct',
+                'source' => $event->source ?? 'unknown',
             ]);
         } catch (Throwable $e) {
             $this->metrics->increment('event_processing_errors_total', [
                 'event_type' => $event->eventType,
                 'error_type' => get_class($e),
-                'source' => 'direct',
+                'source' => $event->source ?? 'unknown',
             ]);
 
             Log::error('Failed to process event', [
                 'event_id' => $event->id,
                 'error' => $e->getMessage(),
                 'trace' => $e->getTraceAsString(),
-                'source' => 'direct',
+                'source' => $event->source ?? 'unknown',
             ]);
 
             throw $e;
@@ -273,154 +175,6 @@ class EventStreamProcessor
             'message_id' => $messageId,
             'processing_time_ms' => round($duration * 1000, 2),
         ]);
-    }
-
-    /**
-     * Забрать зависшие сообщения
-     */
-    private function claimPendingMessages(int $limit): int
-    {
-        $claimed = 0;
-
-        foreach ([self::HIGH_PRIORITY_STREAM, self::STREAM_KEY] as $stream) {
-            // Получаем зависшие сообщения (старше 30 секунд)
-            $pending = Redis::connection()->client()->rawCommand(
-                'XPENDING',
-                $stream,
-                self::CONSUMER_GROUP,
-                'IDLE',
-                30000,  // 30 секунд в миллисекундах
-                '-',
-                '+',
-                $limit
-            );
-
-            /*
-            $pending = Redis::xpending(
-                $stream,
-                self::CONSUMER_GROUP,
-                '-', // start id
-                '+', // end id
-                $limit,
-                ['IDLE' => 30000] // 30 секунд
-            );
-            */
-
-            if (empty($pending)) {
-                continue;
-            }
-
-            $messageIds = array_column($pending, 0);
-
-            // Пытаемся забрать себе
-            $claimedMessages = Redis::xclaim(
-                $stream,
-                self::CONSUMER_GROUP,
-                $this->consumerId,
-                60000, // 60 секунд timeout
-                $messageIds,
-                [
-                    'JUSTID' => true,
-                    'FORCE' => true,
-                ]
-            );
-
-            foreach ($claimedMessages as $messageId) {
-                try {
-                    // Получаем полное сообщение
-                    $range = Redis::xrange($stream, $messageId, $messageId);
-                    if (!empty($range[$messageId])) {
-                        $this->processMessage($messageId, $range[$messageId], $stream);
-                        Redis::xack($stream, self::CONSUMER_GROUP, [$messageId]);
-                        $claimed++;
-                    }
-                } catch (Throwable $e) {
-                    Log::warning('Failed to claim message', [
-                        'message_id' => $messageId,
-                        'error' => $e->getMessage(),
-                    ]);
-                }
-
-                if ($claimed >= $limit) {
-                    break 2;
-                }
-            }
-        }
-
-        if ($claimed > 0) {
-            $this->metrics->increment('events_claimed_total', ['count' => (string) $claimed]);
-        }
-
-        return $claimed;
-    }
-
-    /**
-     * Обработка ошибок при обработке сообщения
-     */
-    private function handleProcessingError(
-        string $messageId,
-        array $message,
-        string $stream,
-        Throwable $e
-    ): void {
-        $attempts = (int) ($message['attempts'] ?? 0) + 1;
-
-        if ($attempts >= self::MAX_RETRIES) {
-            // Отправляем в dead letter queue
-            $this->sendToDeadLetterQueue($messageId, $message, $stream, $e);
-            Redis::xack($stream, self::CONSUMER_GROUP, [$messageId]);
-
-            $this->metrics->increment('events_failed_total', [
-                'reason' => 'max_retries_exceeded',
-                'error_type' => get_class($e),
-            ]);
-
-            Log::error('Event moved to DLQ after max retries', [
-                'message_id' => $messageId,
-                'attempts' => $attempts,
-                'error' => $e->getMessage(),
-                'stream' => $stream,
-            ]);
-        } else {
-            // Возвращаем в поток с увеличенным счетчиком попыток
-            $message['attempts'] = $attempts;
-            $message['last_error'] = $e->getMessage();
-            $message['last_error_at'] = now()->toISOString();
-
-            Redis::xadd($stream, '*', $message, 10000, true);
-            Redis::xack($stream, self::CONSUMER_GROUP, [$messageId]);
-
-            $this->metrics->increment('events_retried_total');
-
-            Log::warning('Event retried', [
-                'message_id' => $messageId,
-                'attempt' => $attempts,
-                'error' => $e->getMessage(),
-                'stream' => $stream,
-            ]);
-        }
-    }
-
-    /**
-     * Отправка в Dead Letter Queue
-     */
-    private function sendToDeadLetterQueue(
-        string $messageId,
-        array $message,
-        string $stream,
-        Throwable $e
-    ): void {
-        $dlqMessage = [
-            'original_message_id' => $messageId,
-            'original_stream' => $stream,
-            'event' => $message['event'] ?? '',
-            'error' => $e->getMessage(),
-            'error_trace' => $e->getTraceAsString(),
-            'failed_at' => now()->toISOString(),
-            'attempts' => $message['attempts'] ?? 0,
-        ];
-
-        Redis::xadd('events_dlq', '*', $dlqMessage, 10000, true);
     }
 
     /**

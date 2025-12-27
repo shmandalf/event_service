@@ -3,8 +3,6 @@
 namespace App\Providers;
 
 use App\Services\Queues\RabbitMQAdapter;
-use App\Services\Queues\QueueAdapterInterface;
-use App\Services\PriorityRouter;
 use Illuminate\Support\ServiceProvider;
 
 class RabbitMQServiceProvider extends ServiceProvider
@@ -28,26 +26,6 @@ class RabbitMQServiceProvider extends ServiceProvider
         });
 
         $this->app->alias('queue.adapter.rabbitmq', RabbitMQAdapter::class);
-
-        $this->app->singleton('queue.adapter.redis', function ($app) {
-            return new \App\Services\Queues\RedisStreamAdapter(
-                $app->make(\App\Services\MetricsService::class),
-                [
-                    'stream_key' => config('queue.connections.redis_stream.queue'),
-                    'high_priority_stream' => 'events_high_priority',
-                    'consumer_group' => 'event_processors',
-                    'max_len' => 10000,
-                ]
-            );
-        });
-
-        $this->app->singleton(PriorityRouter::class, function ($app) {
-            return new PriorityRouter(
-                $app->make('queue.adapter.rabbitmq'),
-                $app->make('queue.adapter.redis'),
-                $app->make(\App\Services\MetricsService::class)
-            );
-        });
     }
 
     public function boot(): void

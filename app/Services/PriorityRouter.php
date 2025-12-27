@@ -5,6 +5,11 @@ namespace App\Services;
 use App\DTO\EventData;
 use App\Services\Queues\QueueAdapterInterface;
 
+/**
+ * Определяет приоритет сообщения
+ *
+ * В зависимости от приоритета, использует RabbitMQ или Redis очередь
+ */
 class PriorityRouter
 {
     private const HIGH_PRIORITY_EVENTS = [
@@ -14,6 +19,9 @@ class PriorityRouter
         'refund',
         'credit_card_added',
     ];
+
+    // покупки свыше этой суммы идут в higher priority queue
+    private const HIGH_PURCHASE_THRESHOLD = 100;
 
     private const PRIORITY_THRESHOLD = 8;
 
@@ -69,18 +77,9 @@ class PriorityRouter
 
         // Проверка по payload (например, большие суммы)
         if ($event->eventType === 'purchase' && isset($event->payload['amount'])) {
-            return $event->payload['amount'] >= 100; // Покупки от $100 - high priority
+            return $event->payload['amount'] >= self::HIGH_PURCHASE_THRESHOLD;
         }
 
         return false;
-    }
-
-    public function getRoutingConfig(): array
-    {
-        return [
-            'high_priority_events' => self::HIGH_PRIORITY_EVENTS,
-            'priority_threshold' => self::PRIORITY_THRESHOLD,
-            'high_purchase_threshold' => 100,
-        ];
     }
 }

@@ -7,12 +7,11 @@ use App\Services\Handlers\RabbitMQEventHandler;
 use App\Services\Queues\RabbitMQAdapter;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Facades\Cache;
 
 class RabbitMQWorker extends Command
 {
     protected $signature = 'rabbitmq:worker
-                            {queue=events.high_priority : Queue name}
+                            {queue=events.high_priority : Queue name (events.high_priority, events.normal)}
                             {--prefetch=10 : Prefetch count}
                             {--timeout=30 : Timeout in seconds for graceful shutdown}
                             {--memory=256 : Memory limit in MB}
