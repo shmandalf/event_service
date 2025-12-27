@@ -72,12 +72,14 @@ class RedisStreamAdapter implements QueueAdapterInterface
                 'stream' => $streamKey,
             ]);
 
+            /*
             Log::debug('Message published to Redis Stream', [
                 'event_id' => $event->id,
                 'stream' => $streamKey,
                 'message_id' => $messageId,
                 'duration_ms' => round($duration * 1000, 2),
             ]);
+            */
 
             return $messageId;
         } catch (\Exception $e) {
@@ -202,85 +204,6 @@ class RedisStreamAdapter implements QueueAdapterInterface
     }
 
     /**
-     * Забрать зависшие сообщения
-     */
-    /*
-    private function claimPendingMessages(int $limit): int
-    {
-        $claimed = 0;
-
-        foreach ([self::HIGH_PRIORITY_STREAM, self::STREAM_KEY] as $stream) {
-            // Получаем зависшие сообщения (старше 30 секунд)
-            $pending = Redis::connection()->client()->rawCommand(
-                'XPENDING',
-                $stream,
-                self::CONSUMER_GROUP,
-                'IDLE',
-                30000,  // 30 секунд в миллисекундах
-                '-',
-                '+',
-                $limit
-            );
-
-            $pending = Redis::xpending(
-                $stream,
-                self::CONSUMER_GROUP,
-                '-', // start id
-                '+', // end id
-                $limit,
-                ['IDLE' => 30000] // 30 секунд
-            );
-
-            if (empty($pending)) {
-                continue;
-            }
-
-            $messageIds = array_column($pending, 0);
-
-            // Пытаемся забрать себе
-            $claimedMessages = Redis::xclaim(
-                $stream,
-                self::CONSUMER_GROUP,
-                $this->consumerId,
-                60000, // 60 секунд timeout
-                $messageIds,
-                [
-                    'JUSTID' => true,
-                    'FORCE' => true,
-                ]
-            );
-
-            foreach ($claimedMessages as $messageId) {
-                try {
-                    // Получаем полное сообщение
-                    $range = Redis::xrange($stream, $messageId, $messageId);
-                    if (!empty($range[$messageId])) {
-                        $this->processMessage($messageId, $range[$messageId], $stream);
-                        Redis::xack($stream, self::CONSUMER_GROUP, [$messageId]);
-                        $claimed++;
-                    }
-                } catch (Throwable $e) {
-                    Log::warning('Failed to claim message', [
-                        'message_id' => $messageId,
-                        'error' => $e->getMessage(),
-                    ]);
-                }
-
-                if ($claimed >= $limit) {
-                    break 2;
-                }
-            }
-        }
-
-        if ($claimed > 0) {
-            $this->metrics->increment('events_claimed_total', ['count' => (string) $claimed]);
-        }
-
-        return $claimed;
-    }
-    */
-
-    /**
      * Отправка в Redis Dead Letter Stream
      */
     private function sendToRedisDLQ(string $messageId, array $message, string $stream, \Exception $e): void
@@ -305,43 +228,60 @@ class RedisStreamAdapter implements QueueAdapterInterface
     }
 
     /**
-     * Получить статистику очереди
+     * Получить статистику стрима
      */
     public function getQueueStats(string $stream): array
     {
         try {
-            $info = Redis::xinfo('STREAM', $stream);
+            $info = \Illuminate\Support\Facades\Redis::xinfo('STREAM', $stream);
 
             return [
                 'length' => $info['length'] ?? 0,
+                'radix_tree_keys' => $info['radix-tree-keys'] ?? 0,
+                'radix_tree_nodes' => $info['radix-tree-nodes'] ?? 0,
                 'last_generated_id' => $info['last-generated-id'] ?? '0-0',
                 'max_deleted_entry_id' => $info['max-deleted-entry-id'] ?? '0-0',
                 'entries_added' => $info['entries-added'] ?? 0,
+                'stream_name' => $stream,
             ];
-        } catch (\Exception $e) {
+        } catch (\Throwable $e) {
+            Log::warning('Failed to get Redis stream stats', [
+                'stream' => $stream,
+                'error' => $e->getMessage(),
+            ]);
+
             return [
                 'length' => 0,
-                'last_generated_id' => '0-0',
-                'max_deleted_entry_id' => '0-0',
-                'entries_added' => 0,
+                'stream_name' => $stream,
+                'error' => $e->getMessage(),
             ];
         }
     }
 
     /**
-     * Получить pending сообщения
+     * Получить статистику pending сообщений
      */
     public function getPendingStats(string $stream): array
     {
         try {
-            $pending = Redis::xpending($stream, $this->consumerGroup, '-', '+', 100);
+            $pending = \Illuminate\Support\Facades\Redis::xpending(
+                $stream,
+                $this->consumerGroup,
+                '-',
+                '+',
+                100
+            );
 
             return [
                 'pending_count' => count($pending),
-                'pending_messages' => $pending,
+                'pending_messages' => array_slice($pending, 0, 10), // первые 10
             ];
-        } catch (\Exception $e) {
-            return ['pending_count' => 0, 'pending_messages' => []];
+        } catch (\Throwable $e) {
+            return [
+                'pending_count' => 0,
+                'pending_messages' => [],
+                'error' => $e->getMessage(),
+            ];
         }
     }
 

@@ -3,7 +3,9 @@
 namespace App\Services\Queues;
 
 use App\DTO\EventData;
+use App\Services\DeadLetterQueueManager;
 use App\Services\MetricsService;
+use App\Services\RetryManager;
 use PhpAmqpLib\Connection\AMQPStreamConnection;
 use PhpAmqpLib\Message\AMQPMessage;
 use PhpAmqpLib\Wire\AMQPTable;
@@ -23,6 +25,8 @@ class RabbitMQAdapter implements QueueAdapterInterface
 
     public function __construct(
         private MetricsService $metrics,
+        private RetryManager $retryManager,
+        private DeadLetterQueueManager $dlqManager,
         private array $config
     ) {
         $this->connect();
@@ -157,7 +161,7 @@ class RabbitMQAdapter implements QueueAdapterInterface
             $this->channel->queue_bind(self::NORMAL_QUEUE, self::EXCHANGE, 'normal');
             $this->channel->queue_bind(self::DLQ_QUEUE, self::DLX_EXCHANGE, 'events.dead');
 
-            Log::debug('RabbitMQ infrastructure declared');
+            // Log::debug('RabbitMQ infrastructure declared');
         } catch (Throwable $e) {
             Log::error('Failed to declare RabbitMQ infrastructure', [
                 'error' => $e->getMessage(),
@@ -262,83 +266,107 @@ class RabbitMQAdapter implements QueueAdapterInterface
         try {
             $callback = function (AMQPMessage $message) use ($handler, $queue, $consumerTag) {
                 $startTime = microtime(true);
+                $messageId = $message->getBody() ? md5($message->getBody()) : 'unknown';
 
                 try {
                     $body = json_decode($message->getBody(), true, 512, JSON_THROW_ON_ERROR);
 
-                    // Создаем EventData из сообщения
-                    $eventData = EventData::fromArray([
-                        'id' => $body['id'] ?? $this->generateEventId($message),
-                        'user_id' => $body['user_id'],
-                        'event_type' => $body['event_type'],
-                        'timestamp' => $body['timestamp'],
-                        'payload' => $body['payload'],
-                        'metadata' => $body['metadata'] ?? null,
-                        'priority' => $body['priority'] ?? 0,
-                        'idempotency_key' => $body['idempotency_key'] ?? null,
+                    // Извлекаем retry count из headers
+                    $headers = $message->has('application_headers')
+                        ? ($message->get('application_headers')?->getNativeData() ?? [])
+                        : [];
+                    $retryCount = $headers['x-retry-count'] ?? 0;
+                    $eventId = $body['id'] ?? $messageId;
+
+                    // Проверяем нужно ли ретраить
+                    if ($retryCount > 0) {
+                        if (!$this->retryManager->shouldRetry($eventId, 'rabbitmq')) {
+                            // Максимальное количество ретраев - отправляем в DLQ
+                            $this->dlqManager->sendToDLQ(
+                                $queue,
+                                $message->getBody(),
+                                $headers,
+                                'Max retries exceeded',
+                                $retryCount
+                            );
+                            $message->ack();
+                            return;
+                        }
+
+                        $this->retryManager->incrementRetryCount($eventId);
+                    }
+
+                    // Создаем EventData
+                    $eventData = EventData::fromArray(array_merge($body, [
                         '_source' => 'rabbitmq',
                         '_queue' => $queue,
                         '_message_id' => $message->getDeliveryTag(),
-                    ]);
+                        '_retry_count' => $retryCount,
+                    ]));
 
                     // Вызываем переданный обработчик
                     $handler($eventData);
 
+                    // Успешная обработка - очищаем retry count
+                    if ($retryCount > 0) {
+                        $this->retryManager->clearRetryCount($eventId);
+                    }
+
                     // Подтверждаем обработку
                     $message->ack();
 
-                    // Метрики
+                    // Метрики успеха
                     $duration = microtime(true) - $startTime;
-                    $this->metrics->histogram('rabbitmq_message_processing_duration_seconds', $duration, [
-                        'queue' => $queue,
-                        'consumer' => $consumerTag,
-                    ]);
-
-                    $this->metrics->increment('rabbitmq_messages_processed_total', [
-                        'queue' => $queue,
-                        'status' => 'success',
-                        'consumer' => $consumerTag,
-                    ]);
-
-                    Log::debug('RabbitMQ message processed', [
-                        'event_id' => $eventData->id,
-                        'queue' => $queue,
-                        'consumer' => $consumerTag,
-                        'processing_time_ms' => round($duration * 1000, 2),
-                        'delivery_tag' => $message->getDeliveryTag(),
-                    ]);
+                    $this->recordSuccessMetrics($queue, $consumerTag, $duration, $retryCount);
                 } catch (\JsonException $e) {
                     // Невалидный JSON - отправляем в DLQ без ретраев
-                    $message->reject(false); // false = не requeue
+                    $this->dlqManager->sendToDLQ(
+                        $queue,
+                        $message->getBody(),
+                        [],
+                        'Invalid JSON: ' . $e->getMessage(),
+                        0
+                    );
+                    $message->ack();
 
-                    $this->metrics->increment('rabbitmq_message_processing_errors_total', [
-                        'queue' => $queue,
-                        'error_type' => 'json_decode',
-                        'consumer' => $consumerTag,
-                    ]);
-
-                    Log::error('Invalid JSON in RabbitMQ message', [
-                        'queue' => $queue,
-                        'error' => $e->getMessage(),
-                        'body_preview' => substr($message->getBody(), 0, 200),
-                        'consumer' => $consumerTag,
-                    ]);
+                    $this->recordErrorMetrics($queue, $consumerTag, 'json_decode');
                 } catch (Throwable $e) {
-                    // Бизнес-ошибка - ретраем сообщение
-                    $message->nack(true); // true = requeue
+                    // \Log::error("Fatal error " . $e->getMessage());
 
-                    $this->metrics->increment('rabbitmq_message_processing_errors_total', [
-                        'queue' => $queue,
-                        'error_type' => get_class($e),
-                        'consumer' => $consumerTag,
-                    ]);
+                    // Бизнес-ошибка
+                    $errorType = get_class($e);
+                    $eventId = $body['id'] ?? $messageId;
 
-                    Log::error('Failed to process RabbitMQ message', [
-                        'queue' => $queue,
-                        'error' => $e->getMessage(),
-                        'consumer' => $consumerTag,
-                        'delivery_tag' => $message->getDeliveryTag(),
-                    ]);
+                    // Проверяем нужно ли ретраить
+                    if ($this->retryManager->shouldRetry($eventId, $errorType)) {
+                        // Отправляем в retry очередь
+                        $retryCount = $this->retryManager->incrementRetryCount($eventId);
+
+                        $this->dlqManager->sendToRetryQueue(
+                            $queue,
+                            $message->getBody(),
+                            $headers ?? [],
+                            $e->getMessage(),
+                            $retryCount
+                        );
+
+                        $message->ack();
+
+                        $this->recordRetryMetrics($queue, $consumerTag, $errorType, $retryCount);
+                    } else {
+                        // Максимальное количество ретраев - в DLQ
+                        $this->dlqManager->sendToDLQ(
+                            $queue,
+                            $message->getBody(),
+                            $headers ?? [],
+                            $e->getMessage(),
+                            $this->retryManager->getRetryCount($eventId)
+                        );
+
+                        $message->ack();
+
+                        $this->recordDLQMetrics($queue, $consumerTag, $errorType);
+                    }
                 }
             };
 
@@ -362,11 +390,13 @@ class RabbitMQAdapter implements QueueAdapterInterface
                 arguments: new AMQPTable()
             );
 
+            /*
             Log::info('Started RabbitMQ consumer', [
                 'queue' => $queue,
                 'consumer_tag' => $consumerTag,
                 'prefetch_count' => $this->config['qos']['prefetch_count'] ?? 10,
             ]);
+            */
 
             // Ожидаем сообщения
             while ($this->channel->is_consuming()) {
@@ -402,12 +432,67 @@ class RabbitMQAdapter implements QueueAdapterInterface
         }
     }
 
+    /**
+     * Записать метрики успешной обработки
+     */
+    private function recordSuccessMetrics(string $queue, string $consumerTag, float $duration, int $retryCount): void
+    {
+        $this->metrics->histogram('rabbitmq_message_processing_duration_seconds', $duration, [
+            'queue' => $queue,
+            'consumer' => $consumerTag,
+            'retry_count' => (string) $retryCount,
+        ]);
+
+        $this->metrics->increment('rabbitmq_messages_processed_total', [
+            'queue' => $queue,
+            'status' => 'success',
+            'consumer' => $consumerTag,
+            'retry_count' => (string) $retryCount,
+        ]);
+    }
+
+    /**
+     * Записать метрики ошибок
+     */
+    private function recordErrorMetrics(string $queue, string $consumerTag, string $errorType): void
+    {
+        $this->metrics->increment('rabbitmq_message_processing_errors_total', [
+            'queue' => $queue,
+            'error_type' => $errorType,
+            'consumer' => $consumerTag,
+        ]);
+    }
+
+    /**
+     * Записать метрики ретраев
+     */
+    private function recordRetryMetrics(string $queue, string $consumerTag, string $errorType, int $retryCount): void
+    {
+        $this->metrics->increment('rabbitmq_message_retried_total', [
+            'queue' => $queue,
+            'error_type' => $errorType,
+            'consumer' => $consumerTag,
+            'retry_count' => (string) $retryCount,
+        ]);
+    }
+
+    /**
+     * Записать метрики DLQ
+     */
+    private function recordDLQMetrics(string $queue, string $consumerTag, string $errorType): void
+    {
+        $this->metrics->increment('rabbitmq_message_dlq_total', [
+            'queue' => $queue,
+            'error_type' => $errorType,
+            'consumer' => $consumerTag,
+        ]);
+    }
+
     private function cancelConsumer(string $consumerTag)
     {
         try {
             if ($this->channel && $this->channel->is_open()) {
                 $this->channel->basic_cancel($consumerTag, false, true);
-                Log::debug('Cancelled RabbitMQ consumer', ['consumer_tag' => $consumerTag]);
             }
         } catch (\Exception $e) {
             Log::warning('Error cancelling consumer', [
@@ -417,33 +502,36 @@ class RabbitMQAdapter implements QueueAdapterInterface
         }
     }
 
-    /**
-     * Генерация ID события если его нет в сообщении
-     */
-    private function generateEventId(AMQPMessage $message): string
-    {
-        return 'rabbitmq_' . $message->getDeliveryTag() . '_' . uniqid();
-    }
-
     public function getQueueStats(string $queue): array
     {
         try {
+            if (!$this->channel || !$this->channel->is_open()) {
+                $this->connect();
+            }
+
+            // Объявляем очередь в пассивном режиме для получения информации
             $result = $this->channel->queue_declare(
                 queue: $queue,
-                passive: true // Только получить информацию
+                passive: true
             );
 
             return [
                 'message_count' => $result[1] ?? 0,
                 'consumer_count' => $result[2] ?? 0,
+                'queue_name' => $queue,
             ];
-        } catch (Throwable $e) {
+        } catch (\Throwable $e) {
             Log::warning('Failed to get RabbitMQ queue stats', [
                 'queue' => $queue,
                 'error' => $e->getMessage(),
             ]);
 
-            return ['message_count' => 0, 'consumer_count' => 0];
+            return [
+                'message_count' => 0,
+                'consumer_count' => 0,
+                'queue_name' => $queue,
+                'error' => $e->getMessage(),
+            ];
         }
     }
 

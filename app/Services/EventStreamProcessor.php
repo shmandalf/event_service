@@ -5,9 +5,9 @@ namespace App\Services;
 use App\DTO\EventData;
 use App\Models\Event;
 use App\Services\CircuitBreaker\CircuitBreaker;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Facades\Redis;
 use Throwable;
 
 class EventStreamProcessor
@@ -182,7 +182,7 @@ class EventStreamProcessor
      */
     private function isAlreadyProcessed(string $idempotencyKey): bool
     {
-        return Redis::exists("idempotency:$idempotencyKey") === 1;
+        return Cache::has("idempotency:$idempotencyKey");
     }
 
     /**
@@ -190,7 +190,7 @@ class EventStreamProcessor
      */
     private function saveIdempotencyKey(string $key, string $eventId, int $ttl = 86400): void
     {
-        Redis::setex("idempotency:$key", $ttl, $eventId);
+        Cache::put("idempotency:$key", $eventId, $ttl);
     }
 
     /**

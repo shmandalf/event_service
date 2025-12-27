@@ -20,7 +20,6 @@ class RedisStreamServiceProvider extends ServiceProvider
                 ]
             );
         });
-
         $this->app->alias('queue.adapter.redis', RedisStreamAdapter::class);
     }
 

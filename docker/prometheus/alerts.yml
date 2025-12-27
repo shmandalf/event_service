@@ -1,0 +1,155 @@
+groups:
+  - name: event_service_alerts
+    rules:
+      # High-level service availability
+      - alert: ServiceDown
+        expr: up{job=~"event-service.*"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          service: event-service
+        annotations:
+          summary: "Service {{ $labels.instance }} is down"
+          description: "{{ $labels.instance }} of job {{ $labels.job }} has been down for more than 1 minute."
+
+      - alert: HighErrorRate
+        expr: |
+          rate(event_processing_errors_total[5m]) /
+          (rate(event_processing_errors_total[5m]) + rate(event_processed_total[5m])) > 0.1
+        for: 5m
+        labels:
+          severity: warning
+          service: event-service
+        annotations:
+          summary: "High error rate in event processing"
+          description: "Error rate is above 10% for the last 5 minutes"
+
+      # Queue monitoring
+      - alert: HighQueueBacklog
+        expr: |
+          redis_stream_length{stream="events_stream"} > 5000 or
+          redis_stream_length{stream="events_high_priority"} > 1000 or
+          rabbitmq_queue_messages{queue="events.high_priority"} > 1000 or
+          rabbitmq_queue_messages{queue="events.normal"} > 10000
+        for: 2m
+        labels:
+          severity: warning
+          service: event-service
+        annotations:
+          summary: "High queue backlog detected"
+          description: "Queue {{ $labels.queue }} has {{ $value }} messages pending"
+
+      - alert: QueueConsumerStalled
+        expr: |
+          rabbitmq_queue_consumers{queue="events.high_priority"} == 0 or
+          rabbitmq_queue_consumers{queue="events.normal"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          service: event-service
+        annotations:
+          summary: "No consumers for queue {{ $labels.queue }}"
+          description: "Queue {{ $labels.queue }} has no active consumers"
+
+      - alert: DLQGrowing
+        expr: |
+          increase(rabbitmq_queue_messages{queue="events.dlq"}[1h]) > 10
+        for: 5m
+        labels:
+          severity: warning
+          service: event-service
+        annotations:
+          summary: "Dead Letter Queue is growing"
+          description: "DLQ gained {{ $value }} messages in the last hour"
+
+      # Performance alerts
+      - alert: HighProcessingLatency
+        expr: |
+          histogram_quantile(0.95, rate(event_processing_duration_seconds_bucket[5m])) > 1
+        for: 5m
+        labels:
+          severity: warning
+          service: event-service
+        annotations:
+          summary: "High event processing latency"
+          description: "95th percentile of processing latency is {{ $value }}s"
+
+      - alert: HighAPIResponseTime
+        expr: |
+          histogram_quantile(0.95, rate(api_request_duration_seconds_bucket{endpoint="events.store"}[5m])) > 0.5
+        for: 2m
+        labels:
+          severity: warning
+          service: event-service
+        annotations:
+          summary: "High API response time"
+          description: "95th percentile of API response time is {{ $value }}s"
+
+      # Circuit breaker alerts
+      - alert: CircuitBreakerOpen
+        expr: |
+          circuit_breaker_state{state="open"} == 1
+        for: 1m
+        labels:
+          severity: critical
+          service: event-service
+        annotations:
+          summary: "Circuit breaker {{ $labels.queue_type }} is OPEN"
+          description: "Circuit breaker for {{ $labels.queue_type }} has been open for 1 minute"
+
+      - alert: HighFailoverRate
+        expr: |
+          rate(queue_failover_total[5m]) > 0.1
+        for: 2m
+        labels:
+          severity: warning
+          service: event-service
+        annotations:
+          summary: "High queue failover rate"
+          description: "Failover rate is {{ $value }} per second"
+
+      # Resource alerts
+      - alert: HighMemoryUsage
+        expr: |
+          process_resident_memory_bytes / 1024 / 1024 > 512
+        for: 5m
+        labels:
+          severity: warning
+          service: event-service
+        annotations:
+          summary: "High memory usage"
+          description: "Process is using {{ $value }}MB of memory"
+
+      - alert: HighCPUUsage
+        expr: |
+          rate(process_cpu_seconds_total[5m]) * 100 > 80
+        for: 5m
+        labels:
+          severity: warning
+          service: event-service
+        annotations:
+          summary: "High CPU usage"
+          description: "CPU usage is {{ $value }}%"
+
+      # Business metrics alerts
+      - alert: LowEventThroughput
+        expr: |
+          rate(events_processed_total[5m]) < 10
+        for: 10m
+        labels:
+          severity: warning
+          service: event-service
+        annotations:
+          summary: "Low event throughput"
+          description: "Event processing rate is {{ $value }} events/second"
+
+      - alert: HighFailedEvents
+        expr: |
+          rate(events_failed_total[1h]) > 100
+        for: 5m
+        labels:
+          severity: warning
+          service: event-service
+        annotations:
+          summary: "High number of failed events"
+          description: "{{ $value }} events failed in the last hour"

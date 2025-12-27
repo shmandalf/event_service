@@ -1,0 +1,38 @@
+{
+  "dashboard": {
+    "title": "Queue Detailed Metrics",
+    "panels": [
+      {
+        "title": "Messages In/Out Rate",
+        "type": "graph",
+        "gridPos": {"h": 8, "w": 24, "x": 0, "y": 0},
+        "targets": [
+          {"expr": "rate(rabbitmq_messages_published_total[5m])", "legendFormat": "RabbitMQ Published", "refId": "A"},
+          {"expr": "rate(rabbitmq_messages_processed_total[5m])", "legendFormat": "RabbitMQ Processed", "refId": "B"},
+          {"expr": "rate(redis_stream_messages_published_total[5m])", "legendFormat": "Redis Published", "refId": "C"},
+          {"expr": "rate(redis_stream_messages_processed_total[5m])", "legendFormat": "Redis Processed", "refId": "D"}
+        ],
+        "yaxes": [{"format": "ops"}, {"format": "short"}]
+      },
+      {
+        "title": "Consumer Count",
+        "type": "graph",
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8},
+        "targets": [
+          {"expr": "rabbitmq_queue_consumers{queue=\"events.high_priority\"}", "legendFormat": "RabbitMQ High", "refId": "A"},
+          {"expr": "rabbitmq_queue_consumers{queue=\"events.normal\"}", "legendFormat": "RabbitMQ Normal", "refId": "B"}
+        ]
+      },
+      {
+        "title": "Retry Statistics",
+        "type": "graph",
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8},
+        "targets": [
+          {"expr": "rate(rabbitmq_message_retried_total[5m])", "legendFormat": "RabbitMQ Retries", "refId": "A"},
+          {"expr": "rabbitmq_queue_messages{queue=\"events.retry\"}", "legendFormat": "Retry Queue", "refId": "B"},
+          {"expr": "rabbitmq_queue_messages{queue=\"events.dlq\"}", "legendFormat": "DLQ", "refId": "C"}
+        ]
+      }
+    ]
+  }
+}

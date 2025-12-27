@@ -1,0 +1,71 @@
+{
+  "dashboard": {
+    "title": "Event Service Overview",
+    "panels": [
+      {
+        "title": "Events Processing Rate",
+        "type": "graph",
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
+        "targets": [{
+          "expr": "sum(rate(events_processed_total[5m])) by (source)",
+          "legendFormat": "{{source}}",
+          "refId": "A"
+        }],
+        "yaxes": [{"format": "ops", "label": "events/sec"}, {"format": "short"}]
+      },
+      {
+        "title": "Processing Latency (p95)",
+        "type": "graph",
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0},
+        "targets": [{
+          "expr": "histogram_quantile(0.95, rate(event_processing_duration_seconds_bucket[5m]))",
+          "legendFormat": "p95",
+          "refId": "A"
+        }],
+        "yaxes": [{"format": "s", "label": "seconds"}, {"format": "short"}]
+      },
+      {
+        "title": "Queue Sizes",
+        "type": "stat",
+        "gridPos": {"h": 4, "w": 6, "x": 0, "y": 8},
+        "targets": [
+          {"expr": "redis_stream_length{stream=\"events_stream\"}", "legendFormat": "Redis Main", "refId": "A"},
+          {"expr": "redis_stream_length{stream=\"events_high_priority\"}", "legendFormat": "Redis High", "refId": "B"},
+          {"expr": "rabbitmq_queue_messages{queue=\"events.high_priority\"}", "legendFormat": "RabbitMQ High", "refId": "C"},
+          {"expr": "rabbitmq_queue_messages{queue=\"events.normal\"}", "legendFormat": "RabbitMQ Normal", "refId": "D"}
+        ]
+      },
+      {
+        "title": "Error Rate",
+        "type": "gauge",
+        "gridPos": {"h": 4, "w": 6, "x": 6, "y": 8},
+        "targets": [{
+          "expr": "rate(event_processing_errors_total[5m]) / (rate(event_processing_errors_total[5m]) + rate(event_processed_total[5m]))",
+          "format": "percentunit",
+          "refId": "A"
+        }],
+        "max": 1,
+        "thresholds": {"steps": [
+          {"color": "green", "value": null},
+          {"color": "yellow", "value": 0.1},
+          {"color": "red", "value": 0.2}
+        ]}
+      },
+      {
+        "title": "Circuit Breaker Status",
+        "type": "table",
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8},
+        "targets": [{
+          "expr": "circuit_breaker_state",
+          "instant": true,
+          "refId": "A"
+        }],
+        "columns": [
+          {"text": "Queue", "value": "queue_type"},
+          {"text": "State", "value": "state"},
+          {"text": "Available", "value": "Value", "type": "boolean"}
+        ]
+      }
+    ]
+  }
+}

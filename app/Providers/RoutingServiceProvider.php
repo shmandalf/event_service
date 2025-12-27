@@ -11,8 +11,8 @@ class RoutingServiceProvider extends ServiceProvider
     {
         $this->app->singleton(PriorityRouter::class, function ($app) {
             return new PriorityRouter(
-                $app->make('queue.adapter.rabbitmq'),
-                $app->make('queue.adapter.redis'),
+                $app->make('queue.adapter.rabbitmq'),  // high priority
+                $app->make('queue.adapter.redis'),     // normal priority
                 $app->make(\App\Services\MetricsService::class)
             );
         });

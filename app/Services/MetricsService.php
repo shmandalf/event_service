@@ -71,6 +71,7 @@ class MetricsService
 
     public function render(): string
     {
+        // $this->debugMetrics();
         $renderer = new RenderTextFormat();
         return $renderer->render($this->registry->getMetricFamilySamples());
     }
@@ -120,5 +121,42 @@ class MetricsService
     public function recordQueueSize(string $queue, int $size): void
     {
         $this->gauge('queue_size', ['queue' => $queue], $size);
+    }
+
+    public function recordCircuitBreakerState(string $queueType, string $state, bool $isAvailable): void
+    {
+        $this->gauge('circuit_breaker_state', [
+            'queue_type' => $queueType,
+            'state' => $state,
+        ], $isAvailable ? 1 : 0);
+    }
+
+    public function recordQueueFailover(string $from, string $to, string $eventType): void
+    {
+        $this->increment('queue_failover_total', [
+            'from' => $from,
+            'to' => $to,
+            'event_type' => $eventType,
+        ]);
+    }
+
+    public function recordDLQOperation(string $operation, string $queue, int $count = 1): void
+    {
+        $this->increment('dlq_operations_total', [
+            'operation' => $operation,
+            'queue' => $queue,
+        ], $count);
+    }
+
+    public function recordRetryOperation(string $eventId, int $retryCount, int $delayMs): void
+    {
+        $this->histogram('retry_delay_milliseconds', $delayMs, [
+            'retry_count' => (string) $retryCount,
+        ]);
+
+        $this->increment('retry_operations_total', [
+            'event_id' => $eventId,
+            'retry_count' => (string) $retryCount,
+        ]);
     }
 }

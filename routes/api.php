@@ -2,11 +2,12 @@
 
 use App\Http\Controllers\Api\EventController;
 use App\Http\Controllers\Api\MetricsController;
+use App\Http\Controllers\Api\SystemController;
 use Illuminate\Support\Facades\Route;
 
 Route::prefix('v1')->group(function () {
     // Аналитические события
-    Route::prefix('events')->middleware(['api', 'throttle:100,1'])->group(function () {
+    Route::prefix('events')->group(function () {
         Route::post('/', [EventController::class, 'store'])
             ->name('events.store');
 
@@ -19,6 +20,14 @@ Route::prefix('v1')->group(function () {
 
     // Статистика
     Route::get('/stats', [MetricsController::class, 'stats']);
+
+    // Системные endpoints
+    Route::prefix('system')->group(function () {
+        Route::get('/info', [SystemController::class, 'info']);
+        Route::get('/queue-stats', [SystemController::class, 'queueStats']);
+        Route::get('/circuit-breakers', [SystemController::class, 'circuitBreakerStats']);
+        Route::get('/health', [SystemController::class, 'health']);
+    });
 
     // Health check
     Route::get('/health', function () {

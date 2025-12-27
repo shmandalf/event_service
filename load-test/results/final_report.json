@@ -1,0 +1,22 @@
+{
+  "timestamp": "2025-12-27 23:31:25",
+  "success": false,
+  "test_scenarios": [
+    {
+      "name": "Low Load",
+      "target": "50 users, 5/s spawn"
+    },
+    {
+      "name": "Medium Load",
+      "target": "200 users, 20/s spawn"
+    },
+    {
+      "name": "High Load",
+      "target": "500 users, 50/s spawn"
+    },
+    {
+      "name": "Peak Load",
+      "target": "1000 users, 100/s spawn"
+    }
+  ]
+}

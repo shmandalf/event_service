@@ -8,6 +8,12 @@ global:
 rule_files:
   - 'alerts.yml'
 
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets:
+          - alertmanager:9093
+
 scrape_configs:
   # Event Service API метрики
   - job_name: 'event-service-api'
@@ -49,8 +55,24 @@ scrape_configs:
     static_configs:
       - targets: ['mysqld-exporter:9104']
 
-alerting:
-  alertmanagers:
-    - static_configs:
-        - targets: []
-          # - alertmanager:9093  # Раскомментировать когда появится Alertmanager
+  # Alertmanager метрики
+  - job_name: 'alertmanager'
+    static_configs:
+      - targets: ['alertmanager:9093']
+
+  # Blackbox exporter для HTTP проверок (опционально)
+  - job_name: 'blackbox'
+    metrics_path: /probe
+    params:
+      module: [http_2xx]
+    static_configs:
+      - targets:
+        - http://app:80/api/v1/health
+        - http://app:80/api/v1/metrics
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: blackbox-exporter:9115

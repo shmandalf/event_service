@@ -55,11 +55,50 @@ services:
             timeout: 5s
     redis:
       image: redis:7-alpine
+      command: >
+        redis-server
+        --maxclients 10000
+        --timeout 0
+        --tcp-backlog 65535
+        --maxmemory 256mb
+        --maxmemory-policy allkeys-lru
       restart: unless-stopped
       ports:
         - '${FORWARD_REDIS_PORT:-6379}:6379'
       volumes:
         - 'sail-redis:/data'
+        - ./docker/redis/redis.conf:/usr/local/etc/redis/redis.conf
+      sysctls:
+        - net.core.somaxconn=65535
+      ulimits:
+        nofile:
+          soft: 65535
+          hard: 65535
+      networks:
+        - sail
+    alertmanager:
+      image: prom/alertmanager:latest
+      container_name: event-alertmanager
+      restart: unless-stopped
+      ports:
+        - "9093:9093"
+        - "9094:9094"
+      volumes:
+        - ./docker/alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml
+        - ./docker/alertmanager/templates:/etc/alertmanager/templates
+        - alertmanager_data:/alertmanager
+      command:
+        - '--config.file=/etc/alertmanager/alertmanager.yml'
+        - '--storage.path=/alertmanager'
+        - '--web.external-url=http://localhost:9093'
+      networks:
+        - sail
+    webhook-server:
+      image: alpine/socat
+      container_name: event-webhook-server
+      command: "tcp-listen:8080,fork,reuseaddr exec:'/bin/cat'"
+      ports:
+        - "8080:8080"
       networks:
         - sail
     prometheus:
@@ -165,4 +204,4 @@ volumes:
     rabbitmq_data:
     prometheus_data:
     grafana_data:
-
+    alertmanager_data:

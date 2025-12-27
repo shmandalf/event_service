@@ -18,6 +18,10 @@
 /public/storage
 /storage
 /vendor
+load-test/load-test/results
+load-test/__pycache__
+venv
+TODO
 Homestead.json
 Homestead.yaml
 Thumbs.db

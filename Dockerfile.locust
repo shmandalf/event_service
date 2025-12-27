@@ -1,0 +1,16 @@
+FROM python:3.11-slim
+
+WORKDIR /app
+
+COPY load-test/requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY load-test/locustfile.py .
+COPY load-test/load_test.py .
+
+# Установка зависимостей для отчета
+RUN pip install pandas
+
+EXPOSE 8089
+
+CMD ["locust", "-f", "locustfile.py", "--host=http://app:80"]

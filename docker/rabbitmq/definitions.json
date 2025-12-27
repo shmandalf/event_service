@@ -58,6 +58,30 @@
       }
     },
     {
+      "name": "events.dlq",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {
+        "x-queue-mode": "lazy",
+        "x-message-ttl": 604800000,
+        "x-max-length": 100000,
+        "x-overflow": "reject-publish"
+      }
+    },
+    {
+      "name": "events.retry",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {
+        "x-dead-letter-exchange": "events",
+        "x-dead-letter-routing-key": "high",
+        "x-message-ttl": 60000,
+        "x-queue-mode": "lazy"
+      }
+    },
+    {
       "name": "events.dead_letter",
       "vhost": "/",
       "durable": true,
@@ -116,6 +140,29 @@
       "definition": {
         "ha-mode": "all",
         "ha-sync-mode": "automatic"
+      },
+      "apply-to": "queues"
+    },
+    {
+      "vhost": "/",
+      "name": "dlq-policy",
+      "pattern": "^events\\.(high_priority|normal)$",
+      "definition": {
+        "dead-letter-exchange": "events.dlx",
+        "dead-letter-routing-key": "dead",
+        "max-length": 10000,
+        "message-ttl": 86400000
+      },
+      "apply-to": "queues"
+    },
+    {
+      "vhost": "/",
+      "name": "retry-policy",
+      "pattern": "^events\\.retry$",
+      "definition": {
+        "dead-letter-exchange": "events",
+        "dead-letter-routing-key": "high",
+        "message-ttl": 60000
       },
       "apply-to": "queues"
     }
