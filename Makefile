@@ -1,38 +1,38 @@
 .PHONY: up down test logs worker shell migrate fresh metrics monitor prometheus grafana logs-metrics rabbitmq rabbitmq-ui rabbitmq-logs rabbitmq-stats rabbitmq-test rabbitmq-workers rabbitmq-worker-logs rabbitmq-worker-restart rabbitmq-worker-status
 
 up:
-	docker-compose up -d
+	./vendor/bin/sail up -d
 	@echo "Services started"
 	@echo "API: http://localhost:80"
 	@echo "Prometheus: http://localhost:9090"
 	@echo "Grafana: http://localhost:3000 (admin/admin)"
 
 down:
-	docker-compose down -v
+	./vendor/bin/sail down -v
 
 build:
-	docker-compose build
+	./vendor/bin/sail build
 
 logs:
-	docker-compose logs -f app
+	./vendor/bin/sail logs -f app
 
 worker:
-	docker-compose exec app php artisan queue:work --queue=high,default --sleep=3 --tries=3 --timeout=60
+	./vendor/bin/sail exec app php artisan queue:work --queue=high,default --sleep=3 --tries=3 --timeout=60
 
 worker-stream:
-	docker-compose exec app php artisan events:process
+	./vendor/bin/sail exec app php artisan events:process
 
 shell:
-	docker-compose exec app bash
+	./vendor/bin/sail exec app bash
 
 migrate:
-	docker-compose exec app php artisan migrate
+	./vendor/bin/sail exec app php artisan migrate
 
 fresh:
-	docker-compose exec app php artisan migrate:fresh --seed
+	./vendor/bin/sail exec app php artisan migrate:fresh --seed
 
 test:
-	docker-compose exec app php artisan test
+	./vendor/bin/sail exec app php artisan test
 
 load-test:
 	python3 load_test.py
@@ -57,7 +57,7 @@ grafana:
 	open http://localhost:3000 || xdg-open http://localhost:3000 || echo "Open manually: http://localhost:3000"
 
 logs-metrics:
-	docker-compose logs --tail=50 prometheus grafana redis-exporter
+	./vendor/bin/sail logs --tail=50 prometheus grafana redis-exporter
 
 rabbitmq:
 	@echo "RabbitMQ Management UI: http://localhost:15672"
@@ -66,10 +66,10 @@ rabbitmq:
 	open http://localhost:15672 || xdg-open http://localhost:15672
 
 rabbitmq-ui:
-	docker-compose exec rabbitmq rabbitmqadmin list queues name messages messages_ready messages_unacknowledged
+	./vendor/bin/sail exec rabbitmq rabbitmqadmin list queues name messages messages_ready messages_unacknowledged
 
 rabbitmq-logs:
-	docker-compose logs --tail=100 rabbitmq
+	./vendor/bin/sail logs --tail=100 rabbitmq
 
 rabbitmq-stats:
 	@echo "=== RabbitMQ Queue Stats ==="
@@ -77,29 +77,29 @@ rabbitmq-stats:
 
 rabbitmq-test:
 	@echo "Testing RabbitMQ connection..."
-	docker-compose exec app php artisan rabbitmq:test
+	./vendor/bin/sail exec app php artisan rabbitmq:test
 
 rabbitmq-consume:
-	docker-compose exec app php artisan rabbitmq:consume high_priority
+	./vendor/bin/sail exec app php artisan rabbitmq:consume high_priority
 
 rabbitmq-workers:
-	docker-compose exec app supervisorctl start rabbitmq-high-worker:*
-	docker-compose exec app supervisorctl start rabbitmq-normal-worker:*
+	./vendor/bin/sail exec app supervisorctl start rabbitmq-high-worker:*
+	./vendor/bin/sail exec app supervisorctl start rabbitmq-normal-worker:*
 
 rabbitmq-worker-logs:
 	@echo "=== High Priority Workers ==="
-	docker-compose exec app tail -f storage/logs/rabbitmq-high-worker.log
+	./vendor/bin/sail exec app tail -f storage/logs/rabbitmq-high-worker.log
 	@echo "\n=== Normal Workers ==="
-	docker-compose exec app tail -f storage/logs/rabbitmq-normal-worker.log
+	./vendor/bin/sail exec app tail -f storage/logs/rabbitmq-normal-worker.log
 
 rabbitmq-worker-restart:
-	docker-compose exec app touch /tmp/restart-workers
-	docker-compose exec app supervisorctl signal HUP rabbitmq-high-worker:*
-	docker-compose exec app supervisorctl signal HUP rabbitmq-normal-worker:*
+	./vendor/bin/sail exec app touch /tmp/restart-workers
+	./vendor/bin/sail exec app supervisorctl signal HUP rabbitmq-high-worker:*
+	./vendor/bin/sail exec app supervisorctl signal HUP rabbitmq-normal-worker:*
 
 rabbitmq-worker-status:
-	docker-compose exec app supervisorctl status rabbitmq-high-worker:*
-	docker-compose exec app supervisorctl status rabbitmq-normal-worker:*
+	./vendor/bin/sail exec app supervisorctl status rabbitmq-high-worker:*
+	./vendor/bin/sail exec app supervisorctl status rabbitmq-normal-worker:*
 
 rabbitmq-test-message:
 	@echo "Sending test message to RabbitMQ..."
