@@ -69,7 +69,7 @@ class PriorityRouter
 
         // Проверка по payload (например, большие суммы)
         if ($event->eventType === 'purchase' && isset($event->payload['amount'])) {
-            return $event->payload['amount'] >= 1000; // Покупки от $1000 - high priority
+            return $event->payload['amount'] >= 100; // Покупки от $100 - high priority
         }
 
         return false;
