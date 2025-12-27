@@ -52,6 +52,12 @@ class MetricsService
 
     public function histogram(string $name, float $value, array $labels = []): void
     {
+        // если вдруг вызовем без меток
+        if (empty($labels)) {
+            $labels = ['default' => 'default'];
+            \Log::warning("Histogram {$name} called without labels, added default label");
+        }
+
         $histogram = $this->registry->getOrRegisterHistogram(
             config('prometheus.namespace', 'event_service'),
             $name,
@@ -69,6 +75,34 @@ class MetricsService
         return $renderer->render($this->registry->getMetricFamilySamples());
     }
 
+    private function debugMetrics(): void
+    {
+        $samples = $this->registry->getMetricFamilySamples();
+
+        foreach ($samples as $metric) {
+            echo "=== Metric: " . $metric->getName() . " ===\n";
+            echo "Help: " . $metric->getHelp() . "\n";
+            echo "Type: " . $metric->getType() . "\n";
+
+            foreach ($metric->getSamples() as $sample) {
+                echo "  Sample: " . $sample->getName() . "\n";
+                echo "    Value: " . $sample->getValue() . "\n";
+
+                $labelNames = $sample->getLabelNames();
+                $labelValues = $sample->getLabelValues();
+
+                echo "    Label names (" . count($labelNames) . "): " . implode(', ', $labelNames) . "\n";
+                echo "    Label values (" . count($labelValues) . "): " . implode(', ', $labelValues) . "\n";
+
+                if (count($labelNames) !== count($labelValues)) {
+                    echo "    ⚠️ ERROR: Label count mismatch!\n";
+                    echo "    Names: " . json_encode($labelNames) . "\n";
+                    echo "    Values: " . json_encode($labelValues) . "\n";
+                }
+            }
+        }
+    }
+
     // Методы для конкретных метрик
     public function recordEventReceived(string $type, int $priority): void
     {
@@ -80,7 +114,7 @@ class MetricsService
 
     public function recordProcessingTime(float $seconds, string $worker): void
     {
-        $this->histogram('event_processing_duration_seconds', $seconds, ['worker' => $worker]);
+        $this->histogram('worker_processing_duration_seconds', $seconds, ['worker' => $worker]);
     }
 
     public function recordQueueSize(string $queue, int $size): void

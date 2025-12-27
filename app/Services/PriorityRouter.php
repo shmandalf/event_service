@@ -31,7 +31,7 @@ class PriorityRouter
         $adapter = $isHighPriority ? $this->highPriorityAdapter : $this->normalPriorityAdapter;
 
         $duration = microtime(true) - $startTime;
-        $this->metrics->histogram('priority_router_duration_seconds', $duration);
+        $this->metrics->histogram('priority_router_duration_seconds', $duration, ['component' => 'router']);
 
         $this->metrics->increment('events_routed_total', [
             'priority' => $isHighPriority ? 'high' : 'normal',

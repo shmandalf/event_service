@@ -58,7 +58,9 @@ class RedisStreamAdapter implements QueueAdapterInterface
                 'priority' => $event->priority,
             ]);
 
-            $this->metrics->histogram('queue_push_duration_seconds', microtime(true) - $startTime);
+            $this->metrics->histogram('queue_push_duration_seconds', microtime(true) - $startTime, [
+                'queue_type' => 'redis'
+            ]);
 
             Log::debug('Event queued', [
                 'event_id' => $event->id,

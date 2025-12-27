@@ -3,7 +3,7 @@ global:
   evaluation_interval: 15s
   external_labels:
     environment: 'development'
-    app: 'event-service'
+    app: 'app'
 
 rule_files:
   - 'alerts.yml'

@@ -84,6 +84,8 @@ class EventStreamProcessor
 
     /**
      * Обработка одного стрима
+     *
+     * @TODO - вынести в Redis адаптер
      */
     private function processStream(string $streamKey, int $limit): int
     {
@@ -254,7 +256,7 @@ class EventStreamProcessor
 
         // 8. Метрики
         $duration = microtime(true) - $startTime;
-        $this->metrics->histogram('event_processing_duration_seconds', $duration, [
+        $this->metrics->histogram('message_processing_duration_seconds', $duration, [
             'event_type' => $eventDto->eventType,
             'priority' => (string) $eventDto->priority,
             'stream' => $stream,

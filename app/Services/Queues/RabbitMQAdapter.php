@@ -60,7 +60,9 @@ class RabbitMQAdapter implements QueueAdapterInterface
             );
 
             $duration = microtime(true) - $startTime;
-            $this->metrics->histogram('rabbitmq_connection_duration_seconds', $duration);
+            $this->metrics->histogram('rabbitmq_connection_duration_seconds', $duration, [
+                'operation' => 'connect'
+            ]);
 
             Log::info('RabbitMQ connected', [
                 'host' => $this->config['host'],

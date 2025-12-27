@@ -86,8 +86,9 @@ class MetricsController extends Controller
 
         try {
             // Redis Stream метрики
-            $stats = $this->streamProcessor->getStats();
-
+            // @TODO: disabled for now
+            // $stats = $this->streamProcessor->getStats();
+            /*
             foreach ($stats as $stream => $data) {
                 if (is_array($data)) {
                     $metrics[] = '# HELP redis_stream_length Redis stream length';
@@ -104,6 +105,7 @@ class MetricsController extends Controller
                     $metrics[] = 'redis_dlq_length ' . $data;
                 }
             }
+            */
 
             // Очередь Laravel
             $laravelQueueSize = Redis::llen('queues:default');
