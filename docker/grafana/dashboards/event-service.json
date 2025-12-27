@@ -1,0 +1,41 @@
+{
+  "dashboard": {
+    "title": "Event Service Dashboard",
+    "panels": [
+      {
+        "title": "Events Received Rate",
+        "type": "graph",
+        "targets": [{
+          "expr": "rate(events_received_total[5m])",
+          "legendFormat": "{{type}} (priority {{priority}})"
+        }]
+      },
+      {
+        "title": "Event Processing Duration",
+        "type": "heatmap",
+        "targets": [{
+          "expr": "histogram_quantile(0.95, rate(event_processing_duration_seconds_bucket[5m]))",
+          "legendFormat": "p95"
+        }]
+      },
+      {
+        "title": "Queue Sizes",
+        "type": "stat",
+        "targets": [
+          { "expr": "redis_stream_length{stream=\"events_stream\"}", "legendFormat": "Main Stream" },
+          { "expr": "redis_stream_length{stream=\"events_high_priority\"}", "legendFormat": "High Priority" },
+          { "expr": "laravel_queue_size", "legendFormat": "Laravel Queue" }
+        ]
+      },
+      {
+        "title": "System Health",
+        "type": "table",
+        "targets": [
+          { "expr": "database_connection_status", "legendFormat": "Database" },
+          { "expr": "redis_connection_status", "legendFormat": "Redis" },
+          { "expr": "events_by_status", "legendFormat": "{{status}}" }
+        ]
+      }
+    ]
+  }
+}

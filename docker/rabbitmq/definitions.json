@@ -1,0 +1,123 @@
+{
+  "users": [
+    {
+      "name": "admin",
+      "password": "admin123",
+      "tags": "administrator"
+    },
+    {
+      "name": "worker",
+      "password": "worker123",
+      "tags": "monitoring"
+    }
+  ],
+  "vhosts": [
+    {
+      "name": "/"
+    }
+  ],
+  "permissions": [
+    {
+      "user": "admin",
+      "vhost": "/",
+      "configure": ".*",
+      "write": ".*",
+      "read": ".*"
+    },
+    {
+      "user": "worker",
+      "vhost": "/",
+      "configure": "",
+      "write": ".*",
+      "read": ".*"
+    }
+  ],
+  "queues": [
+    {
+      "name": "events.high_priority",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {
+        "x-max-priority": 10,
+        "x-dead-letter-exchange": "events.dlx",
+        "x-dead-letter-routing-key": "events.dead",
+        "x-message-ttl": 86400000,
+        "x-queue-mode": "lazy"
+      }
+    },
+    {
+      "name": "events.normal",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {
+        "x-dead-letter-exchange": "events.dlx",
+        "x-dead-letter-routing-key": "events.dead",
+        "x-message-ttl": 604800000
+      }
+    },
+    {
+      "name": "events.dead_letter",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {
+        "x-queue-mode": "lazy"
+      }
+    }
+  ],
+  "exchanges": [
+    {
+      "name": "events",
+      "vhost": "/",
+      "type": "direct",
+      "durable": true,
+      "auto_delete": false,
+      "internal": false
+    },
+    {
+      "name": "events.dlx",
+      "vhost": "/",
+      "type": "direct",
+      "durable": true,
+      "auto_delete": false,
+      "internal": false
+    }
+  ],
+  "bindings": [
+    {
+      "source": "events",
+      "vhost": "/",
+      "destination": "events.high_priority",
+      "destination_type": "queue",
+      "routing_key": "high"
+    },
+    {
+      "source": "events",
+      "vhost": "/",
+      "destination": "events.normal",
+      "destination_type": "queue",
+      "routing_key": "normal"
+    },
+    {
+      "source": "events.dlx",
+      "vhost": "/",
+      "destination": "events.dead_letter",
+      "destination_type": "queue",
+      "routing_key": "events.dead"
+    }
+  ],
+  "policies": [
+    {
+      "vhost": "/",
+      "name": "ha-all",
+      "pattern": ".*",
+      "definition": {
+        "ha-mode": "all",
+        "ha-sync-mode": "automatic"
+      },
+      "apply-to": "queues"
+    }
+  ]
+}
